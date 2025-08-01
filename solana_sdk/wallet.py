@@ -40,8 +40,8 @@ class WalletManager:
             resp = await self.client.request_airdrop(pub, lamports)
             return str(resp.value)
         except Exception as e:
-            print(f"❌ Airdrop не вдався автоматично: {e}")
-            print(f"📤 Зроби airdrop вручну на {pubkey} через https://faucet.solana.com")
+            print(f"Airdrop failed automatically: {e}")
+            print(f"Please perform a manual airdrop for {pubkey} using https://faucet.solana.com")
             return None
 
     def sign_message(self, message: str, secret: list[int]) -> str:
@@ -84,7 +84,7 @@ class WalletManager:
             wallet = json.load(f)
             secret = wallet.get("private_key")
             if not secret:
-                raise ValueError("Файл не містить поля 'private_key'")
+                raise ValueError("File does not contain the 'private_key' field")
         return Keypair.from_bytes(bytes(secret))
 
     @staticmethod
@@ -145,5 +145,6 @@ class WalletManager:
         with open(path, "r") as f:
             return WalletManager.private_key_from_hex(f.read().strip())
 
+    
     async def close(self):
         await self.client.close()

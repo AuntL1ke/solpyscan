@@ -1,7 +1,12 @@
 import asyncio
 import json
 from solana_sdk.wallet import WalletManager
-from solana_sdk.transaction import send_sol, get_transaction_info  # підключено одразу і get_transaction_info
+from solana_sdk.transaction import TransactionManager
+from solders.keypair import Keypair
+from solders.pubkey import Pubkey
+from solders.transaction import VersionedTransaction
+from solders.message import MessageV0
+from solders.system_program import transfer, TransferParams
 
 def load_wallet(path="my_wallet.json") -> dict:
     with open(path, "r") as f:
@@ -9,41 +14,56 @@ def load_wallet(path="my_wallet.json") -> dict:
 
 async def main():
     wm = WalletManager()
+    tm = TransactionManager(wm.client)
 
-    # ✅ Завантажуємо відправника з файлу
+    # Load sender wallet
     sender_wallet = load_wallet()
     sender_secret = sender_wallet['private_key']
     sender_pubkey = sender_wallet['public_key']
+    sender_keypair = Keypair.from_bytes(bytes(sender_secret))
+    print(f"Sender: {sender_pubkey}")
 
-    # 🎯 Генеруємо нового отримувача
+    # Create a new recipient
     recipient_wallet = wm.create_keypair()
     recipient_pubkey = recipient_wallet['public_key']
+    print(f"Recipient: {recipient_pubkey}")
 
-    print(f"🔑 Sender: {sender_pubkey}")
-    print(f"🎯 Recipient: {recipient_pubkey}")
+    # Fund recipient
+    print("\nFunding recipient with 0.003 SOL...")
+    await tm.send_sol(sender_secret, recipient_pubkey, 0.003)
 
-    print("\n💰 Баланс до:")
-    print("   Sender:", await wm.get_balance(sender_pubkey), "SOL")
-    print("   Recipient:", await wm.get_balance(recipient_pubkey), "SOL")
+    # Add memo to transaction
+    print("\nAdding memo to transaction...")
+    memo = "Demo memo"
+    ix = transfer(TransferParams(
+        from_pubkey=Pubkey.from_string(sender_pubkey),
+        to_pubkey=Pubkey.from_string(recipient_pubkey),
+        lamports=10_000
+    ))
+    blockhash = (await wm.client.get_latest_blockhash()).value.blockhash
+    msg = MessageV0.try_compile(
+        payer=Pubkey.from_string(sender_pubkey),
+        instructions=[ix],
+        address_lookup_table_accounts=[],
+        recent_blockhash=blockhash,
+    )
+    tx = VersionedTransaction(msg, [sender_keypair])
+    await tm.add_memo(tx, memo, Pubkey.from_string(sender_pubkey))
 
-    # ======= РЕАЛЬНА ТРАНЗАКЦІЯ (закоментована) =======
-    # print("\n💸 Відправляємо 0.5 SOL...")
-    # tx_sig = await send_sol(wm.client, sender_secret, recipient_pubkey, 0.5)
-    # print("📄 Транзакція:", tx_sig)
+    # Estimate fee
+    print("\nEstimating fee...")
+    fee = await tm.estimate_fee(tx)
+    print("Estimated fee:", fee, "lamports")
 
-    # await asyncio.sleep(2)
+    # Sign and send transaction
+    print("\nSigning and sending transaction...")
+    tx_sig = await tm.sign_and_send_transaction(tx)
+    print("Transaction Signature:", tx_sig)
 
-    print("\n✅ Баланс після:")
-    print("   Sender:", await wm.get_balance(sender_pubkey), "SOL")
-    print("   Recipient:", await wm.get_balance(recipient_pubkey), "SOL")
-
-    # ======= Перевірка транзакції за підписом (можна вставити вручну) =======
-    example_sig = "5wkgsBSZB4E39DkostWys82ZKCa2BY87hxjLBUQM5UfnrCmZcyDz95DtwSTLRpPrcd7DRubjkKVxdULMDVViEQCz"
-    tx_info = await get_transaction_info(wm.client, example_sig)
-    print("\nℹ️ Інформація про транзакцію:")
-    if tx_info:
-        for k, v in tx_info.items():
-            print(f"{k}: {v}")
+    # Get transaction info
+    print("\nGetting transaction info...")
+    tx_info = await tm.get_transaction_info(tx_sig)
+    print("Transaction Info:", tx_info)
 
     await wm.close()
 
